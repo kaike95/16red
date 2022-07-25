@@ -1,0 +1,54 @@
+#!/bin/bash
+echo "16red iniciando"
+for f in *.mp4;                                                                                                                  
+	do size=$(du -k "$f" | cut -f1)
+	if [ "$size" -ge 16001 ]; then
+	echo "Reduzindo video para 16mb:";
+	ffmpeg -loglevel error -stats -i "$f" -c:v libx264 -crf 26 -profile:v baseline -level 3.0 -pix_fmt yuv420p "t-$f";
+	sizeafter=$(du -k "t-$f" | cut -f1);
+	sizefinal=$((size-sizeafter));
+	echo "$f Inicio $size, Final $sizeafter com redução de $sizefinal bytes" >> changed.txt;
+	mkdir -p ../fullsizebackup;
+	cp "$f" ../fullsizebackup/ ;
+	mv "t-$f" "$f";
+	cat changed.txt; rm changed.txt        
+	fi
+done
+
+while true; do
+    read -p "Formatar e cortar video em proporcao 9:16 com 15 segundos por video (Ss/Nn)? : " yn
+    case $yn in
+        [Ss]* ) 
+
+	for f in *.mp4;
+	do length=$(ffprobe -i "$f" -show_entries format=duration -v quiet -of csv="p=0");
+        lenghtn=$(printf '%.*f\n' 0 "$length");
+        total=$((lenghtn/15));
+	cuts=0
+	ratio=$(ffprobe -loglevel error -show_entries stream=display_aspect_ratio -of default=nw=1 "$f" | cut --bytes=22-25)
+	done
+
+	if [ "$ratio" != '9:16' ]
+	then 
+	echo "Formatando proporcao para 9:16:";
+	ffmpeg -loglevel error -stats -i "$f" -vf 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:-1:-1:color=black' "s-$f" ;
+	for ((cutloop=0; cutloop <= total; cutloop++));
+		do echo "Corte video #$((cutloop+1)):"; 
+		ffmpeg -loglevel error -stats -ss "$cuts" -i "s-$f" -t 14.900 "s$cutloop-$f" ;
+		cuts=$((cuts+14.900));
+		done; 
+	else
+
+	for ((cutloop=0; cutloop <= total; cutloop++));
+		do echo "Corte video #$((cutloop+1)):"; 
+		ffmpeg -loglevel error -stats -ss "$cuts" -i "$f" -t 14.900 "s$cutloop-$f" ;
+		cuts=$((cuts+14.900));
+		done; 
+	fi
+
+		break;;
+
+        [Nn]* ) break;;
+        * ) echo "Por favor responda apenas s/n";;
+    esac
+done
