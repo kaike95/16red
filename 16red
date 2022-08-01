@@ -35,14 +35,14 @@ while true; do
 	for ((cutloop=0; cutloop <= total; cutloop++));
 		do echo "Corte video #$((cutloop+1)):"; 
 		ffmpeg -loglevel error -stats -ss "$cuts" -i "s-$f" -t 14.900 "s$cutloop-$f" ;
-		cuts=$((cuts+14.900));
+		cuts=$(echo "$cuts+14.900" | bc);
 		done; 
 	else
 
 	for ((cutloop=0; cutloop <= total; cutloop++));
 		do echo "Corte video #$((cutloop+1)):"; 
 		ffmpeg -loglevel error -stats -ss "$cuts" -i "$f" -t 14.900 "s$cutloop-$f" ;
-		cuts=$((cuts+14.900));
+		cuts=$(echo "$cuts+14.900" | bc);
 		done; 
 	fi
 
