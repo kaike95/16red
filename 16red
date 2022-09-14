@@ -1,54 +1,115 @@
 #!/bin/bash
+#made with help of aakova and TomIO
+trap "rm -f s-*.mp4; exit" SIGINT
 echo "16red iniciando"
-for f in *.mp4;                                                                                                                  
-	do size=$(du -k "$f" | cut -f1)
+
+which ffmpeg &> /dev/null #teste se ffmpeg existe
+[ $? -eq 1 ] && { echo "FFmpeg não presente, por favor instale o FFmpeg antes de usar o 16red" ; exit 2; }
+tech="-loglevel error" #ocultar banner ffmpeg
+#supported_ext='.*\.(mkv|mov|mp4)'
+supported_ext="^.*\.(mkv|mov|mp4)['\"]?$" #regex para verificar se o arquivo selecionado é válido
+
+uso() { echo -e "\n -h = Mostra este texto\n -f = Especifica um arquivo para ser reduzido: ./16red -f 'arquivo.mp4'\n -a = Opera em todos os arquivos presentes no diretório de execução\n -b = Mostra as informações técnicas do ffmpeg, escondidas por padrão no 16red"
+}
+
+quinze() { #cortar o video em partes de quase 15 segundos
+        for ((cutloop=0; cutloop <= total; cutloop++));
+                do echo "Corte video #$((cutloop+1)):";
+		#echo "$f, $quinze_opt"
+                ffmpeg -y $tech -stats -ss "$cuts" -i "$quinze_opt" -t 14.900 "$cutloop-$f" ;
+                cuts=$(echo "$cuts+14.900" | bc);
+                done
+}
+
+red() { #reduzir o video
+	if [[ $f =~ $supported_ext ]]; then #checar se a extensão de vídeo é suportada
+        size=$(du -k "$f" | cut -f1) #obtém tamanho em bytes
 	if [ "$size" -ge 16001 ]; then
-	echo "Reduzindo video para 16mb:";
-	ffmpeg -loglevel error -stats -i "$f" -c:v libx264 -crf 26 -profile:v baseline -level 3.0 -pix_fmt yuv420p "t-$f";
-	sizeafter=$(du -k "t-$f" | cut -f1);
-	sizefinal=$((size-sizeafter));
-	echo "$f Inicio $size, Final $sizeafter com redução de $sizefinal bytes" >> changed.txt;
-	mkdir -p ../fullsizebackup;
-	cp "$f" ../fullsizebackup/ ;
-	mv "t-$f" "$f";
-	cat changed.txt; rm changed.txt        
-	fi
-done
-
-while true; do
-    read -p "Formatar e cortar video em proporcao 9:16 com 15 segundos por video (Ss/Nn)? : " yn
-    case $yn in
-        [Ss]* ) 
-
-	for f in *.mp4;
-	do length=$(ffprobe -i "$f" -show_entries format=duration -v quiet -of csv="p=0");
-        lenghtn=$(printf '%.*f\n' 0 "$length");
-        total=$((lenghtn/15));
-	cuts=0
-	ratio=$(ffprobe -loglevel error -show_entries stream=display_aspect_ratio -of default=nw=1 "$f" | cut --bytes=22-25)
-	done
-
-	if [ "$ratio" != '9:16' ]
-	then 
-	echo "Formatando proporcao para 9:16:";
-	ffmpeg -loglevel error -stats -i "$f" -vf 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:-1:-1:color=black' "s-$f" ;
-	for ((cutloop=0; cutloop <= total; cutloop++));
-		do echo "Corte video #$((cutloop+1)):"; 
-		ffmpeg -loglevel error -stats -ss "$cuts" -i "s-$f" -t 14.900 "s$cutloop-$f" ;
-		cuts=$(echo "$cuts+14.900" | bc);
-		done; 
+                echo "Reduzindo video para 16mb:";
+                ffmpeg $tech -stats -i "$f" -c:v libx264 -crf 26 -profile:v baseline -level 3.0 -pix_fmt yuv420p "t-$f"; #reduz tamanho do vídeo e adiciona yuv420p para dar embed no whatsapp
+                sizeafter=$(du -k "t-$f" | cut -f1); #obtém o tamanho do vídeo processado, em bytes
+                sizefinal=$((size-sizeafter)); #compara
+		echo "$f : Tamanho inicial em kb: $size, Tamanho final em kb: $sizeafter Redução de $sizefinal byte(s)" >> changed.txt;
+                #TODO checar se $sizefinal < 0
+		mkdir -p fullsizebackup; #backup no mesmo diretório
+                cp "$f" fullsizebackup/ ;
+                mv "t-$f" "$f"; 
+                cat changed.txt; rm changed.txt; #mostra arquivos mudados        
+        fi	
 	else
-
-	for ((cutloop=0; cutloop <= total; cutloop++));
-		do echo "Corte video #$((cutloop+1)):"; 
-		ffmpeg -loglevel error -stats -ss "$cuts" -i "$f" -t 14.900 "s$cutloop-$f" ;
-		cuts=$(echo "$cuts+14.900" | bc);
-		done; 
+		echo "Erro : $f : Extensão de vídeo não suportada"; exit 1 #sai se o regex não pegou o formato correto (mp4,mov,mkv)
 	fi
+} 
 
-		break;;
+insta() { #formatar vídeo e depois chamar quinze()
+        length=$(ffprobe -i "$f" -loglevel error -show_entries format=duration -v quiet -of csv="p=0"); #obter duração do vídeo, em segundos
+        lenghtn=$(printf '%.*f\n' 0 "$length"); #cortar decimal
+        total=$((lenghtn/15)); #dividir o tamanho por 15 para obter quantia de cortes para fazer
+        cuts=0 
+        ratio=$(ffprobe -loglevel error -show_entries stream=display_aspect_ratio -of default=nw=1 "$f" | cut --bytes=22-25) #obtém proporção do vídeo
 
-        [Nn]* ) break;;
-        * ) echo "Por favor responda apenas s/n";;
-    esac
+        if [ "$ratio" != '9:16' ]; then 
+        echo "Formatando proporção de exibição para 9:16:";
+        ffmpeg $tech -stats -i "$f" -vf 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:-1:-1:color=black' "s-$f" ; 
+	quinze_opt="s-$f"
+	quinze
+        else
+        echo "Pulando formatação de proporção, vídeo já tem a proporção 9:16."
+        quinze_opt="$f"
+	quinze
+        fi
+}
+
+while getopts "?h?f:?a?b?" opts; do
+case $opts in 
+        [Hh] )
+        uso ;;
+        [Ff] )
+     	#read -rp "Escolha o arquivo desejado para operação: " -e f;
+	for arg in "$@"; do #thanks tom
+	[[ $arg =~ $supported_ext ]] && { f="$arg"; break; } || continue;
+	done
+	[[ $f =~ $supported_ext ]] || { echo "O arquivo passado não é válido ou é uma opcão. Você esqueceu de especificar um vídeo?"; break; exit 2; } #TODO 
+	#echo "$f, $arg"
+	[ -z "$f" ] && { echo "Erro: $f : Arquivo selecionado não existe"; exit 2; } || [ -f "$f" ] && red || { echo "Erro: $f : Não há arquivo com esse nome"; exit 2; }
+        while true; do
+        read -rp "Formatar e cortar video em proporção 9:16 com 15 segundos por vídeo (Ss/Nn)? : " sn
+                case $sn in
+                        [Ss]* ) 
+                        insta; exit 0;;
+
+                        [Nn]* ) break;;
+                        * ) echo "Por favor responda apenas s/n";;
+                esac
+        done ;;
+
+        [Aa] )
+
+        for f in *.mp4;
+        do [ -e "$f" ] && red || { echo "Arquivo inexistente"; exit 2; } ; done
+	while true; do
+        read -rp "Formatar e cortar video em proporção 9:16 com 15 segundos por vídeo (Ss/Nn)? : " sn
+                case $sn in
+                        [Ss]* ) 
+
+                        for f in *.mp4;
+                        do insta; done; exit 0;;
+
+                        [Nn]* ) break;;
+                        * ) echo "Por favor responda apenas s/n";;
+                 esac
+        done ;;
+
+        [Bb] )
+        tech="" ;; #muda $tech para branco, desse jeito ffmpeg mostra logs
+
+        \? ) 
+        echo "$OPTARG: Opção inválida" 1>&2 ;;
+
+        : ) 
+        echo "$OPTARG: É necessário especificar um argumento";;
+
+esac
 done
+ 
+[ -z "$*" ] && uso #thanks tom #checa se nenhum argumento foi dado e mostra como usa
