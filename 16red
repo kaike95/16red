@@ -16,7 +16,7 @@ quinze() { #cortar o video em partes de quase 15 segundos
         for ((cutloop=0; cutloop <= total; cutloop++));
                 do echo "Corte video #$((cutloop+1)):";
 		#echo "$f, $quinze_opt"
-                ffmpeg -y $tech -stats -ss "$cuts" -i "$quinze_opt" -t 14.900 "$cutloop-$f" ;
+                ffmpeg -y $tech -stats -ss "$cuts" -i "$quinze_opt" -t 14.900 "s-$cutloop-$f" ;
                 cuts=$(echo "$cuts+14.900" | bc);
                 done
 }
