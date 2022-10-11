@@ -17,16 +17,21 @@ Efetivo em vídeos de 20-50 segundos
 
 Para implementar: 
   
-	perguntar se quer colocar vídeos antigos em pastas temporárias (deletadas após reboot) em vez de substituir arquivo (parcialmente feito, cria uma nova pasta no local de execução do script)
+	alerta quando o script acaba aumentando o tamanho em vez de reduzi-lo (deletar arquivo ou manter)
 
-  	alerta quando o script acaba aumentando o tamanho em vez de reduzi-lo (deletar arquivo ou manter)
-
-  	escolha de qualidade, provavelmente colocar variável em crf
+	escolha de qualidade, provavelmente colocar variável em crf
 
 	adicionar modo não interativo denovo
 
 novo: 
 
+cria pasta com nome do arquivo e coloca vídeos completos dentro
+
+vídeos em processos são enviados para pastas temporárias
+
+
+
+velho:
 
 Usabilidade melhorada:
 
