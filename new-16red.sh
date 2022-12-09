@@ -3,7 +3,7 @@
 #O código e os comentários estarão em INGLÊS! 
 
 #Start date: December 8 2022
-#Last Update: December 8 2022
+#Last Update: December 9 2022
 #External help: aakova, TomJo2000
 #Purpose: Reduce video filesize to <16MB, optionally format video to 9:16 using black bars and cut formatted video into ≃14.9 second segments.
 
@@ -24,6 +24,7 @@ fi
 SUPPORTED_EXTENSIONS="^.*\.(mkv|mov|mp4)['\"]?$"
 FFMPEGLOGLEVEL="\-loglevel error" #makes ffmpeg hide everything but errors
 DEBUG=0 
+bitrate_mode=0
 
 TEMPDIR=$(mktemp -d -t 16red-XXXXX)
 if [ $? -eq 1 ]; then
@@ -47,7 +48,8 @@ usage() {
 	-h : Shows this prompt
 	-f : Specify file to be used e.g. ${0} -f 'file.mp4'
 	-a : Use all files in \$PWD
-	-b : Shows default FFmpeg info for each processed file 
+	-b : Toggles bitrate mode, faster processing, incertain quality/size
+	-i : Toggles interactive mode, prompting for certain options 
 END
 	exit
 }
@@ -56,37 +58,61 @@ END
 
 # reduce() function:
 # Reduces input video to a filesize lower than the limit of 16MB 
-# Global variables used: 
-# Local variables used: 
+# Global variables used: input_file, filequeue (array), info_checked, output_reduce_filename, bitrate, bitrate_mode, filesize_reduction_total, output_dir
 # External programs used: ffmpeg
-# Requires: sizecheck()
+# Requires: infocheck()
 
 reduce() {
-	if [[ "${input_file}" =~ ${SUPPORTED_EXTENSIONS} ]]; then
-:	
-	else 
-		echo "${input_file} is not supported"
-	fi
-	
+	for input_file in "${filequeue[@]}"; do
+		infocheck
+		output_reduce_filename="t-${input_file}"
+		output_dir="${TEMP}/vid-${input_file}"
+		echo "info_checked = $info_checked"
+		
+		if [[ bitrate_mode -eq 1 ]]; then
+			ffmpeg -y -i "${input_file}" -c:v libx264 -profile:v baseline -level 3.0 -pix_fmt yuv420p -b "${bitrate}"k "${output_dir}/${output_reduce_filename}"
+			reduce_checked=1
+			infocheck
+			echo "${filesize_reduction_total}"
+		fi
+
+		echo "reduce() : found '${input_file}', now do ffmpeg 2-pass" #TODO ffmpeg 2pass implementation 
+	done
 }
 
 
 
-# sizecheck() function:
-# Check processed video filesize
+# infocheck() function:
+# Gathers video data, such as filesize, length and ratio
 # Global variables used:
 # Local variables used: 
-# External programs used: du 
+# External programs used: du, ffprobe, cut
+# Requires: reduce()
 
-sizecheck() {
+infocheck() {
 
-: #placeholder
+	if [[ $info_checked -eq 0 ]]; then
+		initial_filesize=$(cut -f1 <<< "$(du -k "$input_file")")
+		file_aspectratio=$(cut --bytes=22-25 <<< "$(ffprobe -loglevel error -show_entries stream=display_aspect_ratio -of default=nw=1 "$input_file")")
+		#the cut command here is very sensitive to changes to ffprobe's output
+		length=$(printf '%.*f\n' 0 "$(ffprobe -i "$input_file" -loglevel error -show_entries format=duration -of csv="p=0")") # output in seconds
+		[ "${bitrate_mode}" -eq 1 ] && bitrate=$( printf '%.*f\n' 0 $(( 16000*4/length ))) #half the bitrate
+		info_checked=1
+	fi
 
+	# this only runs when reduce() has run at least once, due to $reduce_checked, then resets for future use of the function
+	if [[ $reduce_checked -eq 1 ]]; then
+		final_filesize=$(cut -f1 <<< "$(du -k "${output_reduce_filename}")")
+		filesize_reduction_total=$(( initial_filesize - final_filesize ))
+		reduce_checked=0 
+		reduce
+		info_checked=0
+	fi
 }
 
 # format() function:
 # Format video into 9:16 aspect-ratio
-# Global variables used: 
+# Global variables used: input_file, file_aspectratio 
 # Local variables used: 
 # External programs used: ffprobe, ffmpeg
 
@@ -99,12 +125,18 @@ format() {
 
 # smallcut() function:
 # Cuts input video into smaller ≃14.9 second files (prevents going over with minimal impact)
-# Global variables used: smallcut_input, total, outdir
-# Local variables used: cut_count, cutloop, cut_count(array)
+# Global variables used: smallcut_input, output_dir
+# Local variables used: total_cuts, cutloop, cut_count(array), output_smallcut_filename
 # External programs used: ffmpeg, bc
+# Requires: infocheck()
+
+# !!! smallcut_input != input_file
 
 smallcut() {
-	for ((cutloop=0; cutloop <= total; cutloop++)); do
+	
+	local total_cuts=$(( length/15 ))
+	
+	for ((cutloop=0; cutloop <= total_cuts; cutloop++)); do
 		echo "Cut ${cutloop}"
 		local cut_count=0
 		local output_smallcut_filename="${TEMP}/s-${cutloop}-${input_file}"
@@ -112,35 +144,59 @@ smallcut() {
 		cut_count=$( bc <<< "${cut_count} + 14.900" )
 		cut_files+=("${output_smallcut_filename}")
 	done
-	mkdir -p "${outdir}"
-	mv "${cut_files{@}}" "${outdir}"
+
+	mkdir -p "${output_dir}"
+	mv "${cut_files{@}}" "${output_dir}"
 }
 
 
 
-while getopts "dhf:ab" options; do 
+while getopts "dhf:abi" options; do 
 	case ${options} in
 		d) DEBUG=1 ;;
 
 		h) usage ;;
-		
-		b) FFMPEGLOGLEVEL="" ;; 
+	
+		f)
+			for argument in "$@"; do
+
+				if [[ "${argument}" =~ ${SUPPORTED_EXTENSIONS} ]]; then
+				
+					if [[ ! "${argument}" =~ ${SUPPORTED_EXTENSIONS} || -z "${argument}" ]]; then 
+						#if no argument matches, it causes the last argument to be passed to $input_file, this double checks it
+						echo "${argument} : Passed video is not supported or it is an option"
+						exit 1
+					fi
+					
+					filequeue+=("${argument}")
+					echo "getopts : '${argument}' added to filequeue, it now has ${#filequeue[@]} item(s)"
+					reduce
+
+				else 
+					continue
+					
+				fi
+			
+			done	
+			;;
 
 		a)
 			flag_all=1
 			for file in *; do
-				[[ $file =~ ${SUPPORTED_EXTENSIONS} ]] && filequeue+=("${file}")
-				reduce #function 
+				[[ "$file" =~ ${SUPPORTED_EXTENSIONS} ]] &&	filequeue+=("${file}")
 			done
+			reduce
 			;;
 
-		f)
-			echo "fileinput..." 
-			;;
-			
+		b) bitrate_mode=1 ;;
+
+		i) FFMPEGLOGLEVEL="" ;; 
+
 		\?) "${OPTARG}: Invalid option" 1>&2 ;;
 
-		:) "${OPTARG}: Needs an argument" ;;	
+		:) "${OPTARG}: Needs an argument" ;;
+
 	esac
 done
+
 [ -z "$*" ] && usage #SC2198
