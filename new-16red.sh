@@ -68,6 +68,7 @@ reduce() {
 		infocheck
 		output_reduce_filename="${input_file}"
 		output_dir="${PWD}/vid-${input_file}"
+		mkdir -p ${output_dir}
 		echo "info_checked = $info_checked"
 		
 		if [[ bitrate_mode -eq 1 ]]; then
