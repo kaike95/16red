@@ -49,11 +49,12 @@ usage() {
 	-f : Specify file to be used e.g. ${0} -f 'file.mp4'
 	-a : Use all files in \$PWD
 	-b : Toggles bitrate mode, faster processing, incertain quality/size
+
+not implemented:
 	-i : Toggles interactive mode, prompting for certain options 
 END
 	exit
 }
-
 
 
 # reduce() function:
@@ -65,12 +66,13 @@ END
 reduce() {
 	for input_file in "${filequeue[@]}"; do
 		infocheck
-		output_reduce_filename="t-${input_file}"
-		output_dir="${TEMP}/vid-${input_file}"
+		output_reduce_filename="${input_file}"
+		output_dir="${PWD}/vid-${input_file}"
 		echo "info_checked = $info_checked"
 		
 		if [[ bitrate_mode -eq 1 ]]; then
-			ffmpeg -y -i "${input_file}" -c:v libx264 -profile:v baseline -level 3.0 -pix_fmt yuv420p -b "${bitrate}"k "${output_dir}/${output_reduce_filename}"
+			ffmpeg -y -i "${input_file}" -c:v libx264 -profile:v baseline -level 3.0 -pix_fmt yuv420p -b "${bitrate}"k "${TEMPDIR}/${output_reduce_filename}"
+			mv "${TEMPDIR}/${output_reduce_filename}" "${output_dir}"
 			reduce_checked=1
 			infocheck
 			echo "${filesize_reduction_total}"
@@ -86,8 +88,9 @@ reduce() {
 # Gathers video data, such as filesize, length and ratio
 # Global variables used:
 # Local variables used: 
-# External programs used: du, ffprobe, cut
+# External programs used: du, ffprobe
 # Requires: reduce()
+
 
 infocheck() {
 
@@ -95,8 +98,11 @@ infocheck() {
 		initial_filesize=$(cut -f1 <<< "$(du -k "$input_file")")
 		file_aspectratio=$(cut --bytes=22-25 <<< "$(ffprobe -loglevel error -show_entries stream=display_aspect_ratio -of default=nw=1 "$input_file")")
 		#the cut command here is very sensitive to changes to ffprobe's output
+		
 		length=$(printf '%.*f\n' 0 "$(ffprobe -i "$input_file" -loglevel error -show_entries format=duration -of csv="p=0")") # output in seconds
+		
 		[ "${bitrate_mode}" -eq 1 ] && bitrate=$( printf '%.*f\n' 0 $(( 16000*4/length ))) #half the bitrate
+		
 		info_checked=1
 	fi
 
@@ -112,13 +118,19 @@ infocheck() {
 
 # format() function:
 # Format video into 9:16 aspect-ratio
-# Global variables used: input_file, file_aspectratio 
+# Global variables used: file_aspectratio, FFMPEGLOGLEVEL, input_file, TEMPDIR, output_dir
 # Local variables used: 
 # External programs used: ffprobe, ffmpeg
 
 format() {
 
-: #placeholder
+	if [[ "${file_aspectratio}" != "9:16" ]]; then
+		ffmpeg "${FFMPEGLOGLEVEL}" -stats -i "${input_file}" -vf 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:-1:-1:color=black' "${TEMPDIR}/s-${input_file}"
+		mv "${TEMPDIR}/s-${input_file}" "${output_dir}";
+	else
+		[[ "${DEBUG}" -eq 1 ]] && echo -e "format() : ${input_file} has the correct aspect-ratio, skipping...\n"
+		return
+	fi
 
 }
 
