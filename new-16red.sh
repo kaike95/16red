@@ -3,7 +3,7 @@
 #O código e os comentários estarão em INGLÊS! 
 
 #Start date: December 8 2022
-#Last Update: December 9 2022
+#Last Update: December 11 2022
 #External help: aakova, TomJo2000
 #Purpose: Reduce video filesize to <16MB, optionally format video to 9:16 using black bars and cut formatted video into ≃14.9 second segments.
 
@@ -34,24 +34,22 @@ fi
 
 #Print variables if $DEBUG is on
 
-if [ "${DEBUG}" -eq 1 ]; then
-	cat <<END
+[ "${DEBUG}" -eq 1 ] &&	cat <<END
 16red starting
 Temporary Directory location: "${TEMPDIR}"
 FFMPEGLOGLEVEL: "${FFMPEGLOGLEVEL}"
 END
-fi
 
 usage() {
 	cat <<END
-	-d : Enables debug output
-	-h : Shows this prompt
-	-f : Specify file to be used e.g. ${0} -f 'file.mp4'
-	-a : Use all files in \$PWD
-	-b : Toggles bitrate mode, faster processing, incertain quality/size
+-d : Enables debug output
+-h : Shows this prompt
+-f : Specify file to be used e.g. ${0} -f 'file.mp4'
+-a : Use all files in \$PWD
+-b : Toggles bitrate mode, faster processing, incertain quality/size
 
 not implemented:
-	-i : Toggles interactive mode, prompting for certain options 
+-i : Toggles interactive mode, prompting for certain options 
 END
 	exit
 }
@@ -68,7 +66,7 @@ reduce() {
 		infocheck
 		output_reduce_filename="${input_file}"
 		output_dir="${PWD}/vid-${input_file}"
-		mkdir -p ${output_dir}
+		mkdir -p "${output_dir}"
 		echo "info_checked = $info_checked"
 		
 		if [[ bitrate_mode -eq 1 ]]; then
@@ -102,6 +100,15 @@ infocheck() {
 		
 		length=$(printf '%.*f\n' 0 "$(ffprobe -i "$input_file" -loglevel error -show_entries format=duration -of csv="p=0")") # output in seconds
 		
+		[ "${DEBUG}" -eq 1 ] && cat <<END
+DEBUG : infocheck() variables:
+
+initial_filesize : "${initial_filesize}"
+file_aspectratio : "${file_aspectratio}"
+length : "${length}"
+info_checked : "${info_checked}"
+END
+
 		[ "${bitrate_mode}" -eq 1 ] && bitrate=$( printf '%.*f\n' 0 $(( 16000*4/length ))) #half the bitrate
 		
 		info_checked=1
@@ -164,33 +171,37 @@ smallcut() {
 
 
 
-while getopts "dhf:abi" options; do 
+while getopts ":dhf:abi" options; do 
+#							^ silent mode getopts 
 	case ${options} in
 		d) DEBUG=1 ;;
 
 		h) usage ;;
 	
 		f)
-			for argument in "$@"; do
+			#currently does not output error if file isnt found, #TODO do this
+			for argument_validation in "$@"; do
 
-				if [[ "${argument}" =~ ${SUPPORTED_EXTENSIONS} ]]; then
-				
-					if [[ ! "${argument}" =~ ${SUPPORTED_EXTENSIONS} || -z "${argument}" ]]; then 
-						#if no argument matches, it causes the last argument to be passed to $input_file, this double checks it
-						echo "${argument} : Passed video is not supported or it is an option"
-						exit 1
-					fi
-					
-					filequeue+=("${argument}")
-					echo "getopts : '${argument}' added to filequeue, it now has ${#filequeue[@]} item(s)"
-					reduce
-
-				else 
+				if [[ "${argument_validation}" =~ ${SUPPORTED_EXTENSIONS} && -e "${argument_validation}" ]]; then
+					argument="${argument_validation}"
+				else
+				#outputs for each argument, file included
 					continue
-					
+					# this passes non-matching arguments too, seeking alternatives to this
+
 				fi
-			
-			done	
+
+				if [[ ! "${argument}" =~ ${SUPPORTED_EXTENSIONS} || -z "${argument}" ]]; then 
+					#if no argument matches, it causes the last argument to be passed to $input_file, this double checks it
+					echo "${argument} : Passed video does not exist, is not supported or it is an option"
+					exit 1
+				fi
+
+				[ -f "${argument}" ] && filequeue+=("${argument}")
+				echo "getopts : '${argument}' added to filequeue, it now has ${#filequeue[@]} item(s)"
+
+			done
+			reduce
 			;;
 
 		a)
@@ -205,9 +216,9 @@ while getopts "dhf:abi" options; do
 
 		i) FFMPEGLOGLEVEL="" ;; 
 
-		\?) "${OPTARG}: Invalid option" 1>&2 ;;
+		\?) echo "-${OPTARG}: Invalid option" 1>&2 ; exit 1 ;;
 
-		:) "${OPTARG}: Needs an argument" ;;
+		:) echo "Error : -${OPTARG} : Needs an argument" 1>&2 ; exit 1 ;;
 
 	esac
 done
