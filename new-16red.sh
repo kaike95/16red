@@ -3,7 +3,7 @@
 #O código e os comentários estarão em INGLÊS! 
 
 #Start date: December 8 2022
-#Last Update: December 11 2022
+#Last Update: December 12 2022
 #External help: aakova, TomJo2000
 #Purpose: Reduce video filesize to <16MB, optionally format video to 9:16 using black bars and cut formatted video into ≃14.9 second segments.
 
@@ -34,6 +34,8 @@ if [ $? -eq 1 ]; then
 	echo "'mktemp' command failed to create a temporary directory"
 	exit 1
 fi
+
+trap 'rm -r "${TEMPDIR}"' SIGINT
 
 #Print variables if $DEBUG is on
 
@@ -217,9 +219,9 @@ smallcut() {
 while getopts ":dhf:abli" options; do 
              # ^ silent mode getopts 
 	case ${options} in
-		d) DEBUG=1 ;;
+		d) DEBUG=1; shift ;;
 
-		h) usage ;;
+		h) usage; exit 0 ;;
 	
 		f)
 			for argument_validation in "$@"; do
@@ -260,11 +262,11 @@ while getopts ":dhf:abli" options; do
 			reduce
 			;;
 
-		b) bitrate_mode=1 ;;
+		b) bitrate_mode=1; shift ;;
 
-		l) FFMPEGLOGLEVEL="" ;; 
+		l) FFMPEGLOGLEVEL=""; shift ;; 
 
-		i) INTERACTIVEMODE=1 ;;
+		i) INTERACTIVEMODE=1; shit ;;
 
 		\?) echo "-${OPTARG}: Invalid option" 1>&2 ; exit 1 ;;
 
