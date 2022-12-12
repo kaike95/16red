@@ -266,7 +266,7 @@ while getopts ":dhf:abli" options; do
 
 		l) FFMPEGLOGLEVEL=""; shift ;; 
 
-		i) INTERACTIVEMODE=1; shit ;;
+		i) INTERACTIVEMODE=1; shift ;;
 
 		\?) echo "-${OPTARG}: Invalid option" 1>&2 ; exit 1 ;;
 
