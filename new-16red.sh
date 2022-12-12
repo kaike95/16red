@@ -22,19 +22,22 @@ fi
 #Setting variables
 
 SUPPORTED_EXTENSIONS="^.*\.(mkv|mov|mp4)['\"]?$"
-FFMPEGLOGLEVEL="\-loglevel error" #makes ffmpeg hide everything but errors
+FFMPEGLOGLEVEL="-loglevel error -stats" #makes ffmpeg hide everything but errors
+INTERACTIVEMODE=0
 DEBUG=0 
 bitrate_mode=0
+info_checked=0
+format_checked=0
 
 TEMPDIR=$(mktemp -d -t 16red-XXXXX)
 if [ $? -eq 1 ]; then
 	echo "'mktemp' command failed to create a temporary directory"
-	exit
+	exit 1
 fi
 
 #Print variables if $DEBUG is on
 
-[ "${DEBUG}" -eq 1 ] &&	cat <<END
+[[ "${DEBUG}" -eq 1 ]] &&	cat <<END
 16red starting
 Temporary Directory location: "${TEMPDIR}"
 FFMPEGLOGLEVEL: "${FFMPEGLOGLEVEL}"
@@ -47,7 +50,7 @@ usage() {
 -f : Specify file to be used e.g. ${0} -f 'file.mp4'
 -a : Use all files in \$PWD
 -b : Toggles bitrate mode, faster processing, incertain quality/size
-
+-l : Toggles FFmpeg log level, to show all info. Disabled by default
 not implemented:
 -i : Toggles interactive mode, prompting for certain options 
 END
@@ -57,27 +60,42 @@ END
 
 # reduce() function:
 # Reduces input video to a filesize lower than the limit of 16MB 
-# Global variables used: input_file, filequeue (array), info_checked, output_reduce_filename, bitrate, bitrate_mode, filesize_reduction_total, output_dir
+# Global variables used: input_file, filequeue (array), info_checked, output_reduce_filename, output_dir, initial_filesize, bitrate_mode, bitrate, FFMPEGLOGLEVEL, TEMPDIR, filesize_reduction_total
 # External programs used: ffmpeg
 # Requires: infocheck()
 
 reduce() {
+	
 	for input_file in "${filequeue[@]}"; do
-		infocheck
+		
+		[[ "${info_checked}" -eq 0 ]] && infocheck
 		output_reduce_filename="${input_file}"
 		output_dir="${PWD}/vid-${input_file}"
 		mkdir -p "${output_dir}"
-		echo "info_checked = $info_checked"
 		
-		if [[ bitrate_mode -eq 1 ]]; then
-			ffmpeg -y -i "${input_file}" -c:v libx264 -profile:v baseline -level 3.0 -pix_fmt yuv420p -b "${bitrate}"k "${TEMPDIR}/${output_reduce_filename}"
-			mv "${TEMPDIR}/${output_reduce_filename}" "${output_dir}"
-			reduce_checked=1
-			infocheck
-			echo "${filesize_reduction_total}"
+		if [[ "${initial_filesize}" -ge 16000 ]]; then
+			
+			if [[ "${bitrate_mode}" -eq 1 ]]; then
+				
+				#shellcheck disable=SC2086 #$FFMPEGLOGLEVEL doesn't work while "quoted"
+				ffmpeg $FFMPEGLOGLEVEL -y -i "${input_file}" -c:v libx264 -profile:v baseline -level 3.0 -pix_fmt yuv420p -b:v "${bitrate}"k "${TEMPDIR}/${output_reduce_filename}"
+				mv "${TEMPDIR}/${output_reduce_filename}" "${output_dir}"
+				reduce_checked=1
+				echo "${filesize_reduction_total}"
+				format
+			else
+				
+				echo "reduce() : found '${input_file}', now do ffmpeg 2-pass" #TODO ffmpeg 2pass implementation 
+			
+			fi
+	
+		else
+			
+			echo "Target video under 16MB, skipping"; #TODO add $INTERACTIVEMODE
+			format
+		
 		fi
 
-		echo "reduce() : found '${input_file}', now do ffmpeg 2-pass" #TODO ffmpeg 2pass implementation 
 	done
 }
 
@@ -85,59 +103,79 @@ reduce() {
 
 # infocheck() function:
 # Gathers video data, such as filesize, length and ratio
-# Global variables used:
+# Global variables used: info_checked, initial_filesize, input_file, file_aspectratio, length, DEBUG, bitrate_mode, bitrate, reduce_checked, final_filesize, filesize_reduction_total
 # Local variables used: 
 # External programs used: du, ffprobe
 # Requires: reduce()
 
 
 infocheck() {
-
 	if [[ $info_checked -eq 0 ]]; then
-		initial_filesize=$(cut -f1 <<< "$(du -k "$input_file")")
+
+		initial_filesize="$(cut -f1 <<< "$(du -k "$input_file")")"
+
+		[[ "${initial_filesize}" -eq 0 ]] && { echo "Error: file size is 0, aborting"; exit 1; }
+
 		file_aspectratio=$(cut --bytes=22-25 <<< "$(ffprobe -loglevel error -show_entries stream=display_aspect_ratio -of default=nw=1 "$input_file")")
-		#the cut command here is very sensitive to changes to ffprobe's output
+		#the cut command above is very sensitive to changes to ffprobe's output
 		
+		[[ -z "$file_aspectratio" ]] && {	echo "Error: video could not get processed by FFprobe, cannot continue. Aborting...";	exit 1; }
 		length=$(printf '%.*f\n' 0 "$(ffprobe -i "$input_file" -loglevel error -show_entries format=duration -of csv="p=0")") # output in seconds
 		
-		[ "${DEBUG}" -eq 1 ] && cat <<END
+		[[ "${DEBUG}" -eq 1 ]] && cat <<END
 DEBUG : infocheck() variables:
 
-initial_filesize : "${initial_filesize}"
-file_aspectratio : "${file_aspectratio}"
-length : "${length}"
-info_checked : "${info_checked}"
+initial_filesize : ${initial_filesize}
+file_aspectratio : ${file_aspectratio}
+length : ${length}
+info_checked : ${info_checked}
 END
 
-		[ "${bitrate_mode}" -eq 1 ] && bitrate=$( printf '%.*f\n' 0 $(( 16000*4/length ))) #half the bitrate
-		
+		[[ "${bitrate_mode}" -eq 1 ]] && bitrate=$( printf '%.*f\n' 0 $(( 16000*4/length ))) #half the bitrate
 		info_checked=1
+	
 	fi
 
 	# this only runs when reduce() has run at least once, due to $reduce_checked, then resets for future use of the function
 	if [[ $reduce_checked -eq 1 ]]; then
+	
 		final_filesize=$(cut -f1 <<< "$(du -k "${output_reduce_filename}")")
 		filesize_reduction_total=$(( initial_filesize - final_filesize ))
 		reduce_checked=0 
 		reduce
 		info_checked=0
+	
 	fi
 }
 
 # format() function:
 # Format video into 9:16 aspect-ratio
-# Global variables used: file_aspectratio, FFMPEGLOGLEVEL, input_file, TEMPDIR, output_dir
+# Global variables used: output_dir, input_file; file_aspectratio, FFMPEGLOGLEVEL, TEMPDIR
 # Local variables used: 
-# External programs used: ffprobe, ffmpeg
+# External programs used: ffmpeg
+# Requires: smallcut()
 
 format() {
-
+	
+	[[ ! -d "${output_dir}" ]] && { 
+	output_dir="${PWD}/vid-${input_file}"
+	mkdir -p "${output_dir}"
+	}
+	
 	if [[ "${file_aspectratio}" != "9:16" ]]; then
-		ffmpeg "${FFMPEGLOGLEVEL}" -stats -i "${input_file}" -vf 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:-1:-1:color=black' "${TEMPDIR}/s-${input_file}"
+		
+		[[ "${DEBUG}" -eq 1 ]] && echo "format() starting using $input_file"
+		#shellcheck disable=SC2086
+		ffmpeg $FFMPEGLOGLEVEL -y -i "${input_file}" -vf 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:-1:-1:color=black' "${TEMPDIR}/s-${input_file}"
 		mv "${TEMPDIR}/s-${input_file}" "${output_dir}";
+		format_checked=1
+		smallcut
+	
 	else
+	
 		[[ "${DEBUG}" -eq 1 ]] && echo -e "format() : ${input_file} has the correct aspect-ratio, skipping...\n"
-		return
+		smallcut
+	
 	fi
 
 }
@@ -145,76 +183,88 @@ format() {
 
 # smallcut() function:
 # Cuts input video into smaller ≃14.9 second files (prevents going over with minimal impact)
-# Global variables used: smallcut_input, output_dir
-# Local variables used: total_cuts, cutloop, cut_count(array), output_smallcut_filename
+# Global variables used: format_checked, smallcut_input, output_dir, input_file, TEMP, FFMPEGLOGLEVEL
+# Local variables used: total_cuts, cutloop, cut_files(array), output_smallcut_filename
 # External programs used: ffmpeg, bc
 # Requires: infocheck()
 
-# !!! smallcut_input != input_file
 
 smallcut() {
 	
-	local total_cuts=$(( length/15 ))
+	[[ "${format_checked}" -eq 1 ]] && smallcut_input="${output_dir}/s-${input_file}" || smallcut_input="${input_file}"
+	# If format() has run successfully, change $smallcut_input to it's output, if not set to input_file, as it's already formatted
+
+	local _total_cuts=$(( length/15 ))
 	
-	for ((cutloop=0; cutloop <= total_cuts; cutloop++)); do
-		echo "Cut ${cutloop}"
-		local cut_count=0
-		local output_smallcut_filename="${TEMP}/s-${cutloop}-${input_file}"
-		ffmpeg -y "${FFMPEGLOGLEVEL}" -stats -ss "${cut_count}" -i "${smallcut_input}" -t 14.900 "${output_smallcut_filename}"
-		cut_count=$( bc <<< "${cut_count} + 14.900" )
-		cut_files+=("${output_smallcut_filename}")
+	for ((_cutloop=0; cutloop <= _total_cuts; cutloop++)); do
+		
+		echo "Cut ${_cutloop}"
+		local _cut_count=0
+		local _output_smallcut_filename="${TEMP}/s-${_cutloop}-${input_file}"
+		#shellcheck disable=SC2086
+		ffmpeg -y $FFMPEGLOGLEVEL -ss "${_cut_count}" -i "${smallcut_input}" -t 14.900 "${_output_smallcut_filename}"
+		_cut_count=$( bc <<< "${_cut_count} + 14.900" )
+		_cut_files+=("${_output_smallcut_filename}")
+	
 	done
 
 	mkdir -p "${output_dir}"
-	mv "${cut_files{@}}" "${output_dir}"
+	mv "${_cut_files[@]}" "${output_dir}"
 }
 
 
 
-while getopts ":dhf:abi" options; do 
-#							^ silent mode getopts 
+while getopts ":dhf:abli" options; do 
+             # ^ silent mode getopts 
 	case ${options} in
 		d) DEBUG=1 ;;
 
 		h) usage ;;
 	
 		f)
-			#currently does not output error if file isnt found, #TODO do this
 			for argument_validation in "$@"; do
 
-				if [[ "${argument_validation}" =~ ${SUPPORTED_EXTENSIONS} && -e "${argument_validation}" ]]; then
+				if [[ "${argument_validation}" =~ $SUPPORTED_EXTENSIONS && -e "${argument_validation}" ]]; then
 					argument="${argument_validation}"
-				else
-				#outputs for each argument, file included
-					continue
-					# this passes non-matching arguments too, seeking alternatives to this
-
+					break	
+					# if nothing matches, this passes "" (nothing), seeking alternatives to this
 				fi
+			
+			done
+					
+				[[ "${DEBUG}" -eq 1 ]] && echo -e "Argument passed: ${argument_validation}\nArgument validated: ${argument}"
 
-				if [[ ! "${argument}" =~ ${SUPPORTED_EXTENSIONS} || -z "${argument}" ]]; then 
-					#if no argument matches, it causes the last argument to be passed to $input_file, this double checks it
+				if [[ ! "${argument}" =~ $SUPPORTED_EXTENSIONS || -z "${argument}" ]]; then 
+					
+					#if no argument matches, it causes the last argument to be passed to $argument, this double checks it
 					echo "${argument} : Passed video does not exist, is not supported or it is an option"
 					exit 1
+				
 				fi
 
-				[ -f "${argument}" ] && filequeue+=("${argument}")
-				echo "getopts : '${argument}' added to filequeue, it now has ${#filequeue[@]} item(s)"
+				[[ -f "${argument}" ]] && filequeue+=("${argument}")
+				[[ "${DEBUG}" -eq 1 ]] && echo "getopts : '${argument}' added to filequeue, it now has ${#filequeue[@]} item(s)"
 
-			done
 			reduce
 			;;
 
 		a)
 			flag_all=1
 			for file in *; do
-				[[ "$file" =~ ${SUPPORTED_EXTENSIONS} ]] &&	filequeue+=("${file}")
+				
+				[[ "$file" =~ ${SUPPORTED_EXTENSIONS} && ! -d "${file}" ]] &&	filequeue+=("${file}")
+			
 			done
+			
+			echo "Files found: " "${filequeue[@]}"
 			reduce
 			;;
 
 		b) bitrate_mode=1 ;;
 
-		i) FFMPEGLOGLEVEL="" ;; 
+		l) FFMPEGLOGLEVEL="" ;; 
+
+		i) INTERACTIVEMODE=1 ;;
 
 		\?) echo "-${OPTARG}: Invalid option" 1>&2 ; exit 1 ;;
 
