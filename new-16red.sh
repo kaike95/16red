@@ -3,9 +3,11 @@
 #O código e os comentários estarão em INGLÊS!
 
 #Start date: December 8 2022
-#Last Update: December 13 2022
+#Last Update: December 14 2022
 #External help: aakova, TomJo2000
 #Purpose: Reduce video filesize to <16MB, optionally format video to 9:16 using black bars and cut formatted video into ≃14.9 second segments.
+
+#TODO: FFmpeg 2-pass and interactive mode (prompt for changes)
 
 #Dependency check:
 
@@ -29,6 +31,7 @@ bitrate_mode=0
 info_checked=0
 format_checked=0
 flag_all=0
+ARRAYINDEX=0
 
 TEMPDIR=$(mktemp -d -t 16red-XXXXX)
 if [ $? -eq 1 ]; then
@@ -36,7 +39,7 @@ if [ $? -eq 1 ]; then
 	exit 1
 fi
 
-trap 'rm -r "${TEMPDIR}"' SIGINT
+trap 'rm -r "${TEMPDIR}"; exit 1' SIGINT
 
 usage() {
 	cat <<END
@@ -66,6 +69,16 @@ reduce() {
 	for input_file in "${filequeue[@]}"; do
 
 		[[ "${info_checked}" -eq 0 ]] && infocheck
+
+		# if something wrong happens in infocheck() and doesn't exit with an error, go for the next file
+		[[ "$?" -eq 2 ]] && {
+
+		info_checked=0
+		input_file="${filequeue[0]}"
+		infocheck
+
+		}
+
 		output_reduce_filename="${input_file}"
 		output_dir="${PWD}/vid-${input_file}"
 		mkdir -p "${output_dir}"
@@ -79,21 +92,27 @@ reduce() {
 				mv "${TEMPDIR}/${output_reduce_filename}" "${output_dir}"
 				reduce_checked=1
 				echo "${filesize_reduction_total}"
+
+				filequeue=( "${filequeue[@]:0:$ARRAYINDEX}" "${filequeue[@]:(($ARRAYINDEX+1))}" )
 				format
+
 			else
 
 				echo "reduce() : found '${input_file}', now do ffmpeg 2-pass" #TODO ffmpeg 2pass implementation
-
+				filequeue=( "${filequeue[@]:0:$ARRAYINDEX}" "${filequeue[@]:(($ARRAYINDEX+1))}" )
+				#format
 			fi
 
 		else
 
 			echo "Target video under 16MB, skipping"; #TODO add $INTERACTIVEMODE
+			filequeue=( "${filequeue[@]:0:$ARRAYINDEX}" "${filequeue[@]:(($ARRAYINDEX+1))}" )
 			format
 
 		fi
 
 	done
+
 }
 
 
@@ -111,7 +130,28 @@ infocheck() {
 
 		initial_filesize="$(cut -f1 <<< "$(du -k "$input_file")")"
 
-		[[ "${initial_filesize}" -eq 0 ]] && { echo "Error: file size is 0, aborting"; exit 1; }
+		if [[ "${initial_filesize}" -eq 0 ]]; then
+
+			if [[ "${flag_all}" -eq 1 ]]; then
+
+				echo "Error: $input_file file size is 0, removing from queue"
+
+				#unsets the current file in queue, go for the next
+				filequeue=( "${filequeue[@]:0:$ARRAYINDEX}" "${filequeue[@]:(($ARRAYINDEX+1))}" )
+				input_file="${filequeue[0]}"
+
+				[[ "${#filequeue[@]}" -eq 0 ]] && { echo "Error: no more files in filequeue, aborting..."; exit 1; }
+
+				initial_filesize="$(cut -f1 <<< "$(du -k "$input_file")")"
+
+			else
+
+				echo "Error: file size is 0, aborting"
+				exit 1
+
+			fi
+
+		fi
 
 		file_aspectratio=$(cut -d "=" -f2 <<< "$(ffprobe -loglevel error -show_entries stream=display_aspect_ratio -of default=nw=1 "$input_file")")
 
@@ -161,7 +201,9 @@ format() {
 	if [[ "${file_aspectratio}" != "9:16" ]]; then
 
 		[[ "${DEBUG}" -eq 1 ]] && echo "format() starting using $input_file"
+		
 		#shellcheck disable=SC2086
+		
 		ffmpeg $FFMPEGLOGLEVEL -y -i "${input_file}" -vf 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:-1:-1:color=black' "${TEMPDIR}/s-${input_file}"
 		mv "${TEMPDIR}/s-${input_file}" "${output_dir}";
 		format_checked=1
@@ -179,7 +221,7 @@ format() {
 
 # smallcut() function:
 # Cuts input video into smaller ≃14.9 second files (prevents going over with minimal impact)
-# Global variables used: format_checked, smallcut_input, output_dir, input_file, TEMP, FFMPEGLOGLEVEL
+# Global variables used: format_checked, smallcut_input, output_dir, input_file, TEMPDIR, FFMPEGLOGLEVEL
 # Local variables used: total_cuts, cutloop, cut_files(array), output_smallcut_filename
 # External programs used: ffmpeg, bc
 # Requires: infocheck()
@@ -191,14 +233,14 @@ smallcut() {
 	# If format() has run successfully, change $smallcut_input to it's output, if not set to input_file, as it's already formatted
 
 	local _total_cuts=$(( length/15 ))
+	local _cut_count=0
 
-	for ((_cutloop=0; cutloop <= _total_cuts; cutloop++)); do
+	for ((_cutloop=0; _cutloop <= _total_cuts; _cutloop++)); do
 
-		echo "Cut ${_cutloop}"
-		local _cut_count=0
-		local _output_smallcut_filename="${TEMP}/s-${_cutloop}-${input_file}"
+		echo "Cut $((_cutloop+1))"
+		local _output_smallcut_filename="${TEMPDIR}/s-${_cutloop}-${input_file}"
 		#shellcheck disable=SC2086
-		ffmpeg -y $FFMPEGLOGLEVEL -ss "${_cut_count}" -i "${smallcut_input}" -t 14.900 "${_output_smallcut_filename}"
+		ffmpeg $FFMPEGLOGLEVEL -ss "${_cut_count}" -i "${smallcut_input}" -t 14.900 "${_output_smallcut_filename}"
 		_cut_count=$( bc <<< "${_cut_count} + 14.900" )
 		_cut_files+=("${_output_smallcut_filename}")
 
@@ -207,7 +249,6 @@ smallcut() {
 	mkdir -p "${output_dir}"
 	mv "${_cut_files[@]}" "${output_dir}"
 }
-
 
 
 while getopts ":dhabli" options; do
