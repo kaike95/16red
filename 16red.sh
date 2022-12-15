@@ -39,14 +39,14 @@ if [ $? -eq 1 ]; then
 	exit 1
 fi
 
-trap 'rm -r "${TEMPDIR}"; exit 1' SIGINT
+trap 'rm -r "${TEMPDIR}"; exit 130' SIGINT
 
 usage() {
 	cat <<END
 -d : Enables debug output
 -h : Shows this prompt
 -a : Use all files in \$PWD
--b : Toggles bitrate mode, faster processing, incertain quality/size
+-b : Toggles only bitrate mode, faster processing, incertain quality/size (targets 8mb)
 -l : Toggles FFmpeg log level, to show all info. Disabled by default
 not implemented:
 -i : Toggles interactive mode, prompting for certain options
@@ -84,24 +84,30 @@ reduce() {
 		mkdir -p "${output_dir}"
 
 		if [[ "${initial_filesize}" -ge 16000 ]]; then
+		
 
+			#shellcheck disable=SC2086 #$FFMPEGLOGLEVEL doesn't work while "quoted"
 			if [[ "${bitrate_mode}" -eq 1 ]]; then
 
-				#shellcheck disable=SC2086 #$FFMPEGLOGLEVEL doesn't work while "quoted"
 				ffmpeg $FFMPEGLOGLEVEL -y -i "${input_file}" -c:v libx264 -profile:v baseline -level 3.0 -pix_fmt yuv420p -b:v "${bitrate}"k "${TEMPDIR}/${output_reduce_filename}"
-				mv "${TEMPDIR}/${output_reduce_filename}" "${output_dir}"
-				reduce_checked=1
-				echo "${filesize_reduction_total}"
-
-				filequeue=( "${filequeue[@]:0:$ARRAYINDEX}" "${filequeue[@]:(($ARRAYINDEX+1))}" )
-				format
 
 			else
 
-				echo "reduce() : found '${input_file}', now do ffmpeg 2-pass" #TODO ffmpeg 2pass implementation
-				filequeue=( "${filequeue[@]:0:$ARRAYINDEX}" "${filequeue[@]:(($ARRAYINDEX+1))}" )
-				#format
+				[[ "${DEBUG}" -eq 1 ]] && echo -e "\nreduce() : found '${input_file}'\nbitrate='${bitrate}'"
+
+				echo "${input_file} : Pass 1"
+				ffmpeg $FFMPEGLOGLEVEL -y -i "${input_file}" -c:v libx264 -pix_fmt yuv420p -b:v "${bitrate}"k -pass 1 -vsync cfr -f null /dev/null &&	\
+				echo "${input_file} : Pass 2" && \
+				ffmpeg $FFMPEGLOGLEVEL -i "${input_file}" -c:v libx264 -pix_fmt yuv420p -b:v "${bitrate}"k -pass 2 -c:a copy "${TEMPDIR}/${output_reduce_filename}"
+
 			fi
+
+			reduce_checked=1
+			infocheck
+			echo "${filesize_reduction_total}"
+			mv "${TEMPDIR}/${output_reduce_filename}" "${output_dir}"
+			filequeue=( "${filequeue[@]:0:$ARRAYINDEX}" "${filequeue[@]:(($ARRAYINDEX+1))}" )
+			format
 
 		else
 
@@ -167,7 +173,7 @@ length : ${length}
 info_checked : ${info_checked}
 END
 
-		[[ "${bitrate_mode}" -eq 1 ]] && bitrate=$( printf '%.*f\n' 0 $(( 16000*4/length ))) #half the bitrate
+		bitrate=$( printf '%.*f\n' 0 $(( 16000*4/length - 128))) #half the bitrate minus audio bitrate
 		info_checked=1
 
 	fi
@@ -175,12 +181,15 @@ END
 	# this only runs when reduce() has run at least once, due to $reduce_checked, then resets for future use of the function
 	if [[ $reduce_checked -eq 1 ]]; then
 
-		final_filesize=$(cut -f1 <<< "$(du -k "${output_reduce_filename}")")
+		final_filesize=$(cut -f1 <<< "$(du -k "${TEMPDIR}/${output_reduce_filename}")")
 		filesize_reduction_total=$(( initial_filesize - final_filesize ))
-		reduce_checked=0
-		reduce
-		info_checked=0
-
+		if [[ "${final_filesize}" -ge 16000 ]]; then
+			echo "Output filesize above 16MB, retrying with a lower bitrate"
+			bitrate=$((bitrate-256))
+			reduce_checked=0
+			reduce
+			info_checked=0
+		fi
 	fi
 }
 
@@ -280,6 +289,7 @@ END
 [[ $# -ge 2 ]] && shift $((OPTIND-1))
 
 [[ "${flag_all}" -eq 0 ]] && {
+
 		for argument_validation in "$@"; do
 
 			if [[ "${argument_validation}" =~ $SUPPORTED_EXTENSIONS && -e "${argument_validation}" ]]; then
@@ -298,6 +308,11 @@ END
 
 		if [[ ! "${argument}" =~ $SUPPORTED_EXTENSIONS || -z "${argument}" ]]; then
 
+			if [[ "${#filequeue[@]}" -eq 0 ]]; then
+				echo "No files in filequeue, did you forget to specify a file?"
+				exit 1
+			fi
+
 			#if no argument matches, it causes the last argument to be passed to $argument, this double checks it
 			echo "${argument} : Passed video does not exist, is not supported or it is an option"
 			exit 1
@@ -308,6 +323,7 @@ END
 		[[ "${DEBUG}" -eq 1 ]] && echo "getopts : '${argument}' added to filequeue, it now has ${#filequeue[@]} item(s)"
 
 		reduce
+
 }
 
 [[ "${flag_all}" -eq 1 ]] && {
@@ -324,8 +340,12 @@ END
 		[[ "$file" =~ ${SUPPORTED_EXTENSIONS} && ! -d "${file}" ]] &&	filequeue+=("${file}")
 
 	done
+	
+	if [[ "${#filequeue[@]}" -eq 0 ]]; then
+		echo "No valid files found"
+	fi
 
-	echo "Files found: " "${filequeue[@]}"
+	[[ "${DEBUG}" -eq 1 ]] && echo "Files found: " "${filequeue[@]}"
 	reduce
 
 }
