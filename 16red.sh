@@ -7,17 +7,12 @@
 #External help: aakova, TomJo2000
 #Purpose: Reduce video filesize to <16MB, optionally format video to 9:16 using black bars and cut formatted video into ≃14.9 second segments.
 
-#TODO: FFmpeg 2-pass and interactive mode (prompt for changes)
+#TODO: interactive mode (prompt for changes)
 
 #Dependency check:
 
 if ! command -v ffmpeg &> /dev/null ; then
 	echo "'FFmpeg' was not found in the current user install"
-	exit
-fi
-
-if ! command -v bc &> /dev/null ; then
-	echo "'bc' was not found in the current user install"
 	exit
 fi
 
@@ -126,9 +121,9 @@ reduce() {
 # infocheck() function:
 # Gathers video data, such as filesize, length and ratio
 # Global variables used: info_checked, initial_filesize, input_file, file_aspectratio, length, DEBUG, bitrate_mode, bitrate, reduce_checked, final_filesize, filesize_reduction_total
-# Local variables used:
 # External programs used: du, ffprobe
 # Requires: reduce()
+# Required by: reduce(), format(), smallcut()
 
 
 infocheck() {
@@ -196,9 +191,8 @@ END
 # format() function:
 # Format video into 9:16 aspect-ratio
 # Global variables used: output_dir, input_file; file_aspectratio, FFMPEGLOGLEVEL, TEMPDIR
-# Local variables used:
 # External programs used: ffmpeg
-# Requires: smallcut()
+# Requires: smallcut(), infocheck()
 
 format() {
 
@@ -230,11 +224,11 @@ format() {
 
 # smallcut() function:
 # Cuts input video into smaller ≃14.9 second files (prevents going over with minimal impact)
-# Global variables used: format_checked, smallcut_input, output_dir, input_file, TEMPDIR, FFMPEGLOGLEVEL
-# Local variables used: total_cuts, cutloop, cut_files(array), output_smallcut_filename
-# External programs used: ffmpeg, bc
+# Global variables used: format_checked, smallcut_input, output_dir, input_file, length, TEMPDIR, FFMPEGLOGLEVEL
+# Local variables used: total_cuts, cut_count, cut_count_final, cutloop, cut_files(array), output_smallcut_filename
+# External programs used: ffmpeg
 # Requires: infocheck()
-
+# Required by: format()
 
 smallcut() {
 
@@ -243,14 +237,19 @@ smallcut() {
 
 	local _total_cuts=$(( length/15 ))
 	local _cut_count=0
+	local _cut_count_final=0
 
 	for ((_cutloop=0; _cutloop <= _total_cuts; _cutloop++)); do
 
 		echo "Cut $((_cutloop+1))"
 		local _output_smallcut_filename="${TEMPDIR}/s-${_cutloop}-${input_file}"
 		#shellcheck disable=SC2086
-		ffmpeg $FFMPEGLOGLEVEL -ss "${_cut_count}" -i "${smallcut_input}" -t 14.900 "${_output_smallcut_filename}"
-		_cut_count=$( bc <<< "${_cut_count} + 14.900" )
+		ffmpeg $FFMPEGLOGLEVEL -ss "${_cut_count_final}" -i "${smallcut_input}" -t 14.900 "${_output_smallcut_filename}"
+
+		# replaces bc with scientific notation using printf # shell-tips.com/bash/math-arithmetic-calculation
+		_cut_count=$( printf "$(( 149 + ${_cut_count} ))" )
+		_cut_count_final=$( printf %.1f "(( ${_cut_count} ))e-1" )
+
 		_cut_files+=("${_output_smallcut_filename}")
 
 	done
@@ -277,7 +276,8 @@ done
 #Print variables if $DEBUG is on
 
 [[ "${DEBUG}" -eq 1 ]] &&	cat <<END
-16red starting
+16red starting...
+
 Temporary Directory location: "${TEMPDIR}"
 FFMPEGLOGLEVEL: "${FFMPEGLOGLEVEL}"
 Arguments passed: "$*"
