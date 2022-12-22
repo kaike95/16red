@@ -154,7 +154,8 @@ infocheck() {
 
 		fi
 
-		file_aspectratio=$(cut -d "=" -f2 <<< "$(ffprobe -loglevel error -show_entries stream=display_aspect_ratio -of default=nw=1 "$input_file")")
+		file_aspectratio=$(ffprobe "${input_file}" -show_entries stream=display_aspect_ratio -of csv=p=0:nk=1 -v 0)
+		#https://ffmpeg.org/ffprobe.html#compact_002c-csv
 
 		[[ -z "$file_aspectratio" ]] && { echo "Error: video could not get processed by FFprobe, cannot continue. Aborting...";	exit 1; }
 		length=$(printf '%.*f\n' 0 "$(ffprobe -i "$input_file" -v 16 -show_entries format=duration -of csv="p=0")") # output in seconds
