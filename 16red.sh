@@ -3,7 +3,7 @@
 #O código e os comentários estarão em INGLÊS!
 
 #Start date: December 8 2022
-#Last Update: December 14 2022
+#Last Update: December 22 2022
 #External help: aakova, TomJo2000
 #Purpose: Reduce video filesize to <16MB, optionally format video to 9:16 using black bars and cut formatted video into ≃14.9 second segments.
 
@@ -19,7 +19,7 @@ fi
 #Setting variables
 
 SUPPORTED_EXTENSIONS="^.*\.(mkv|mov|mp4)['\"]?$"
-FFMPEGLOGLEVEL="-loglevel error -stats" #makes ffmpeg hide everything but errors
+FFMPEGLOGLEVEL="-v 16 -stats" #makes ffmpeg/ffprobe hide everything but errors
 INTERACTIVEMODE=0
 DEBUG=0
 bitrate_mode=0
@@ -42,7 +42,7 @@ usage() {
 -h : Shows this prompt
 -a : Use all files in \$PWD
 -b : Toggles only bitrate mode, faster processing, incertain quality/size (targets 8mb)
--l : Toggles FFmpeg log level, to show all info. Disabled by default
+-l : Toggles FFmpeg log level to normal. Disabled by default
 not implemented:
 -i : Toggles interactive mode, prompting for certain options
 
@@ -156,8 +156,8 @@ infocheck() {
 
 		file_aspectratio=$(cut -d "=" -f2 <<< "$(ffprobe -loglevel error -show_entries stream=display_aspect_ratio -of default=nw=1 "$input_file")")
 
-		[[ -z "$file_aspectratio" ]] && {	echo "Error: video could not get processed by FFprobe, cannot continue. Aborting...";	exit 1; }
-		length=$(printf '%.*f\n' 0 "$(ffprobe -i "$input_file" -loglevel error -show_entries format=duration -of csv="p=0")") # output in seconds
+		[[ -z "$file_aspectratio" ]] && { echo "Error: video could not get processed by FFprobe, cannot continue. Aborting...";	exit 1; }
+		length=$(printf '%.*f\n' 0 "$(ffprobe -i "$input_file" -v 16 -show_entries format=duration -of csv="p=0")") # output in seconds
 
 		[[ "${DEBUG}" -eq 1 ]] && cat <<END
 DEBUG : infocheck() variables:
@@ -275,7 +275,7 @@ done
 
 #Print variables if $DEBUG is on
 
-[[ "${DEBUG}" -eq 1 ]] &&	cat <<END
+[[ "${DEBUG}" -eq 1 ]] && cat <<END
 16red starting...
 
 Temporary Directory location: "${TEMPDIR}"
@@ -337,10 +337,10 @@ END
 
 	for file in *; do
 
-		[[ "$file" =~ ${SUPPORTED_EXTENSIONS} && ! -d "${file}" ]] &&	filequeue+=("${file}")
+		[[ "$file" =~ ${SUPPORTED_EXTENSIONS} && ! -d "${file}" ]] && filequeue+=("${file}")
 
 	done
-	
+
 	if [[ "${#filequeue[@]}" -eq 0 ]]; then
 		echo "No valid files found"
 	fi
