@@ -215,7 +215,7 @@ format() {
 
 	else
 
-		[[ "${DEBUG}" -eq 1 ]] && echo -e "format() : ${input_file} has the correct aspect-ratio, skipping...\n"
+		echo -e "format() : ${input_file} has the correct aspect-ratio of 9:16, skipping...\n"
 		smallcut
 
 	fi
