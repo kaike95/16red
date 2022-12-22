@@ -245,7 +245,7 @@ smallcut() {
 		echo "Cut $((_cutloop+1))"
 		local _output_smallcut_filename="${TEMPDIR}/s-${_cutloop}-${input_file}"
 		#shellcheck disable=SC2086
-		ffmpeg $FFMPEGLOGLEVEL -ss "${_cut_count_final}" -i "${smallcut_input}" -t 14.900 "${_output_smallcut_filename}"
+		ffmpeg $FFMPEGLOGLEVEL -ss "${_cut_count_final}" -i "${smallcut_input}" -t 14.900 -c copy "${_output_smallcut_filename}"
 
 		# replaces bc with scientific notation using printf # shell-tips.com/bash/math-arithmetic-calculation
 		_cut_count=$( printf "$(( 149 + ${_cut_count} ))" )
