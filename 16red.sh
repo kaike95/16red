@@ -248,8 +248,8 @@ smallcut() {
 		ffmpeg $FFMPEGLOGLEVEL -ss "${_cut_count_final}" -i "${smallcut_input}" -t 14.900 -c copy "${_output_smallcut_filename}"
 
 		# replaces bc with scientific notation using printf # shell-tips.com/bash/math-arithmetic-calculation
-		_cut_count=$( printf "$(( 149 + ${_cut_count} ))" )
 		_cut_count_final=$( printf %.1f "$(( ${_cut_count} ))e-1" )
+		_cut_count=$(( 149 + _cut_count ))
 
 		_cut_files+=("${_output_smallcut_filename}")
 
@@ -264,7 +264,7 @@ while getopts ":dhabli" options; do
              # ^ silent mode getopts
 	case ${options} in
 		d) DEBUG=1 ;;
-		h) usage; exit ;;
+		h) usage ;;
 		a) flag_all=1 ;;
 		b) bitrate_mode=1 ;;
 		l) FFMPEGLOGLEVEL="" ;;
