@@ -137,7 +137,7 @@ infocheck() {
 
 				echo "Error: $input_file file size is 0, removing from queue"
 
-				#unsets the current file in queue, go for the next
+				# unsets the current file in queue, go for the next
 				filequeue=( "${filequeue[@]:0:$ARRAYINDEX}" "${filequeue[@]:(($ARRAYINDEX+1))}" )
 				input_file="${filequeue[0]}"
 
@@ -161,6 +161,7 @@ infocheck() {
 		length=$(printf '%.*f\n' 0 "$(ffprobe -i "$input_file" -v 16 -show_entries format=duration -of csv="p=0")") # output in seconds
 
 		[[ "${DEBUG}" -eq 1 ]] && cat <<END
+
 DEBUG : infocheck() variables:
 
 initial_filesize : ${initial_filesize}
@@ -226,7 +227,7 @@ format() {
 # smallcut() function:
 # Cuts input video into smaller ≃14.9 second files (prevents going over with minimal impact)
 # Global variables used: format_checked, smallcut_input, output_dir, input_file, length, TEMPDIR, FFMPEGLOGLEVEL
-# Local variables used: total_cuts, cut_count, cut_count_final, cutloop, cut_files(array), output_smallcut_filename
+# Local variables used: total_cuts, cut_count, cut_count_final, cutloop, cut_files(array), output_smallcut_filename, copyflag, bitrate
 # External programs used: ffmpeg
 # Requires: infocheck()
 # Required by: format()
@@ -237,15 +238,25 @@ smallcut() {
 	# If format() has run successfully, change $smallcut_input to it's output, if not set to input_file, as it's already formatted
 
 	local _total_cuts=$(( length/15 ))
+
+	[[ "${_total_cuts}" -lt 1 ]] && {
+		echo "Passed video is smaller than 15 seconds, skipping..."
+		return 0
+	}
+
 	local _cut_count=0
 	local _cut_count_final=0
+	local _copyflag="-c copy"
 
 	for ((_cutloop=0; _cutloop <= _total_cuts; _cutloop++)); do
 
 		echo "Cut $((_cutloop+1))"
 		local _output_smallcut_filename="${TEMPDIR}/s-${_cutloop}-${input_file}"
 		#shellcheck disable=SC2086
-		ffmpeg $FFMPEGLOGLEVEL -ss "${_cut_count_final}" -i "${smallcut_input}" -t 14.900 -c copy "${_output_smallcut_filename}"
+		ffmpeg $FFMPEGLOGLEVEL -ss "${_cut_count_final}" -i "${smallcut_input}" -t 14.900 $_copyflag -b:v "${bitrate}"k "${_output_smallcut_filename}"
+
+		# -c copy is fine for the first, but for the remaining this can cause playback problems
+		_copyflag=""
 
 		# replaces bc with scientific notation using printf # shell-tips.com/bash/math-arithmetic-calculation
 		_cut_count=$(( 149 + _cut_count ))
