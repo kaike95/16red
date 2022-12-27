@@ -43,9 +43,9 @@ usage() {
 -a : Use all files in \$PWD
 -b : Toggles only bitrate mode, faster processing, incertain quality/size (targets 8mb)
 -l : Toggles FFmpeg log level to normal. Disabled by default
+-m : Enables -movflag faststart, might take longer to start but helps with playback issues
 not implemented:
 -i : Toggles interactive mode, prompting for certain options
-
 Usage example: ${0} (-b) (-d) file.mp4
 
 END
@@ -55,7 +55,7 @@ END
 
 # reduce() function:
 # Reduces input video to a filesize lower than the limit of 16MB
-# Global variables used: input_file, filequeue (array), info_checked, output_reduce_filename, output_dir, initial_filesize, bitrate_mode, bitrate, FFMPEGLOGLEVEL, TEMPDIR, filesize_reduction_total
+# Global variables used: input_file, filequeue (array), info_checked, output_reduce_filename, output_dir, initial_filesize, bitrate_mode, FFMPEGLOGLEVEL, movflag, bitrate, TEMPDIR, filesize_reduction_total
 # External programs used: ffmpeg
 # Requires: infocheck()
 
@@ -84,7 +84,7 @@ reduce() {
 			#shellcheck disable=SC2086 #$FFMPEGLOGLEVEL doesn't work while "quoted"
 			if [[ "${bitrate_mode}" -eq 1 ]]; then
 
-				ffmpeg $FFMPEGLOGLEVEL -y -i "${input_file}" -c:v libx264 -profile:v baseline -level 3.0 -pix_fmt yuv420p -b:v "${bitrate}"k "${TEMPDIR}/${output_reduce_filename}"
+				ffmpeg $FFMPEGLOGLEVEL -y -i "${input_file}" -c:v libx264 -profile:v baseline -level 3.0 -pix_fmt yuv420p -b:v "${bitrate}"k $movflag "${TEMPDIR}/${output_reduce_filename}"
 
 			else
 
@@ -93,7 +93,7 @@ reduce() {
 				echo "${input_file} : Pass 1"
 				ffmpeg $FFMPEGLOGLEVEL -y -i "${input_file}" -c:v libx264 -pix_fmt yuv420p -b:v "${bitrate}"k -pass 1 -vsync cfr -f null /dev/null &&	\
 				echo "${input_file} : Pass 2" && \
-				ffmpeg $FFMPEGLOGLEVEL -i "${input_file}" -c:v libx264 -pix_fmt yuv420p -b:v "${bitrate}"k -pass 2 -c:a copy "${TEMPDIR}/${output_reduce_filename}"
+				ffmpeg $FFMPEGLOGLEVEL -i "${input_file}" -c:v libx264 -pix_fmt yuv420p -b:v "${bitrate}"k -pass 2 -c:a copy $movflag "${TEMPDIR}/${output_reduce_filename}"
 
 			fi
 
@@ -192,7 +192,7 @@ END
 
 # format() function:
 # Format video into 9:16 aspect-ratio
-# Global variables used: output_dir, input_file; file_aspectratio, FFMPEGLOGLEVEL, TEMPDIR
+# Global variables used: output_dir, input_file, file_aspectratio, FFMPEGLOGLEVEL, movflag, bitrate, TEMPDIR
 # External programs used: ffmpeg
 # Requires: smallcut(), infocheck()
 
@@ -206,10 +206,9 @@ format() {
 	if [[ "${file_aspectratio}" != "9:16" ]]; then
 
 		[[ "${DEBUG}" -eq 1 ]] && echo "format() starting using $input_file"
-		
+
 		#shellcheck disable=SC2086
-		
-		ffmpeg $FFMPEGLOGLEVEL -y -i "${input_file}" -vf 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:-1:-1:color=black' "${TEMPDIR}/s-${input_file}"
+		ffmpeg $FFMPEGLOGLEVEL -y -i "${input_file}" -vf 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:-1:-1:color=black' $movflag -b:v "${bitrate}"k "${TEMPDIR}/s-${input_file}"
 		mv "${TEMPDIR}/s-${input_file}" "${output_dir}";
 		format_checked=1
 		smallcut
@@ -227,7 +226,7 @@ format() {
 # smallcut() function:
 # Cuts input video into smaller ≃14.9 second files (prevents going over with minimal impact)
 # Global variables used: format_checked, smallcut_input, output_dir, input_file, length, TEMPDIR, FFMPEGLOGLEVEL
-# Local variables used: total_cuts, cut_count, cut_count_final, cutloop, cut_files(array), output_smallcut_filename, copyflag, bitrate
+# Local variables used: total_cuts, cut_count, cut_count_final, cutloop, cut_files(array), output_smallcut_filename, copyflag, movflag, bitrate
 # External programs used: ffmpeg
 # Requires: infocheck()
 # Required by: format()
@@ -253,7 +252,7 @@ smallcut() {
 		echo "Cut $((_cutloop+1))"
 		local _output_smallcut_filename="${TEMPDIR}/s-${_cutloop}-${input_file}"
 		#shellcheck disable=SC2086
-		ffmpeg $FFMPEGLOGLEVEL -ss "${_cut_count_final}" -i "${smallcut_input}" -t 14.900 $_copyflag -b:v "${bitrate}"k "${_output_smallcut_filename}"
+		ffmpeg $FFMPEGLOGLEVEL -ss "${_cut_count_final}" -i "${smallcut_input}" -t 14.900 $_copyflag $movflag -b:v "${bitrate}"k "${_output_smallcut_filename}"
 
 		# -c copy is fine for the first, but for the remaining this can cause playback problems
 		_copyflag=""
@@ -271,7 +270,7 @@ smallcut() {
 }
 
 
-while getopts ":dhabli" options; do
+while getopts ":dhablmi" options; do
              # ^ silent mode getopts
 	case ${options} in
 		d) DEBUG=1 ;;
@@ -279,6 +278,7 @@ while getopts ":dhabli" options; do
 		a) flag_all=1 ;;
 		b) bitrate_mode=1 ;;
 		l) FFMPEGLOGLEVEL="" ;;
+		m) movflag="-movflags faststart" ;;
 		i) INTERACTIVEMODE=1 ;;
 		\?) echo "-${OPTARG}: Invalid option" 1>&2 ; exit 1 ;;
 		:) echo "Error : -${OPTARG} : Needs an argument" 1>&2 ; exit 1 ;;
