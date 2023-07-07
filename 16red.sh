@@ -3,7 +3,7 @@
 #O código e os comentários estarão em INGLÊS!
 
 #Start date: December 8 2022
-#Last Update: December 22 2022
+#Last Update: July 2023
 #External help: aakova, TomJo2000
 #Purpose: Reduce video filesize to <16MB, optionally format video to 9:16 using black bars and cut formatted video into ≃14.9 second segments.
 
@@ -303,7 +303,7 @@ END
 
 		for argument_validation in "$@"; do
 
-			if [[ "$(file --mime-type "${argument_validation}")" =~ $ && -e "${argument_validation}" ]]; then
+			if [[ "$(file -b --mime-type "${argument_validation}")" =~ "video" && -e "${argument_validation}" ]]; then
 				valid_argument="${argument_validation}"
 				[[ -d "${argument_validation}" ]] && {
 					error "${argument_validation} is a directory, aborting..." 1
