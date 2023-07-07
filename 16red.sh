@@ -11,10 +11,12 @@
 
 #Dependency check:
 
-if ! command -v ffmpeg &> /dev/null ; then
-	echo "'FFmpeg' was not found in the current user install"
-	exit
-fi
+error() {
+	>&2 echo -e "\033[0;31mError: ${1:-on line $LINENO - non specified}\033[0m"
+	exit "${2}"
+}
+
+command -v ffmpeg &> /dev/null || error "'FFmpeg' was not found in the current user install" 1
 
 #Setting variables
 
@@ -26,14 +28,13 @@ info_checked=0
 format_checked=0
 flag_all=0
 ARRAYINDEX=0
-
-TEMPDIR=$(mktemp -d -t 16red-XXXXX)
-if [ $? -eq 1 ]; then
-	echo "'mktemp' command failed to create a temporary directory"
-	exit 1
-fi
+TEMPDIR=$(mktemp -d -t 16red-XXXXX) || error "'mktemp' command failed to create a temporary directory" 1
 
 trap 'rm -r "${TEMPDIR}"; exit 130' SIGINT
+
+debug() {
+	[[ "${DEBUG}" -eq 1 ]] && echo -e "\033[0;33m$*\033[0m"
+}
 
 usage() {
 	cat <<END
@@ -87,7 +88,7 @@ reduce() {
 
 			else
 
-				[[ "${DEBUG}" -eq 1 ]] && echo -e "\nreduce() : found '${input_file}'\nbitrate='${bitrate}'"
+				debug "\nreduce() : found '${input_file}'\nbitrate='${bitrate}'"
 
 				echo "${input_file} : Pass 1"
 				ffmpeg $FFMPEGLOGLEVEL -y -i "${input_file}" -c:v libx264 -pix_fmt yuv420p -b:v "${bitrate}"k -pass 1 -vsync cfr -f null /dev/null &&	\
@@ -134,20 +135,19 @@ infocheck() {
 
 			if [[ "${flag_all}" -eq 1 ]]; then
 
-				echo "Error: $input_file file size is 0, removing from queue"
+				echo "$input_file file size is 0, removing from queue"
 
 				# unsets the current file in queue, go for the next
 				filequeue=( "${filequeue[@]:0:$ARRAYINDEX}" "${filequeue[@]:(($ARRAYINDEX+1))}" )
 				input_file="${filequeue[0]}"
 
-				[[ "${#filequeue[@]}" -eq 0 ]] && { echo "Error: no more files in filequeue, aborting..."; exit 1; }
+				[[ "${#filequeue[@]}" -eq 0 ]] && { error "no more files in filequeue, aborting..." 1 ; }
 
 				initial_filesize="$(cut -f1 <<< "$(du -k "$input_file")")"
 
 			else
 
-				echo "Error: file size is 0, aborting"
-				exit 1
+				error "file size is 0, aborting" 1
 
 			fi
 
@@ -156,7 +156,7 @@ infocheck() {
 		file_aspectratio=$(ffprobe "${input_file}" -show_entries stream=display_aspect_ratio -of csv=p=0:nk=1 -v 0)
 		#https://ffmpeg.org/ffprobe.html#compact_002c-csv
 
-		[[ -z "$file_aspectratio" ]] && { echo "Error: video could not get processed by FFprobe, cannot continue. Aborting...";	exit 1; }
+		[[ -z "$file_aspectratio" ]] && { error "video could not get processed by FFprobe, cannot continue. Aborting..." 1; }
 		length=$(printf '%.*f\n' 0 "$(ffprobe -i "$input_file" -v 16 -show_entries format=duration -of csv="p=0")") # output in seconds
 
 		[[ "${DEBUG}" -eq 1 ]] && cat <<END
@@ -204,7 +204,7 @@ format() {
 
 	if [[ "${file_aspectratio}" != "9:16" ]]; then
 
-		[[ "${DEBUG}" -eq 1 ]] && echo "format() starting using $input_file"
+		debug "format() starting using $input_file"
 
 		#shellcheck disable=SC2086
 		ffmpeg $FFMPEGLOGLEVEL -y -i "${input_file}" -vf 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:-1:-1:color=black' $movflag -b:v "${bitrate}"k "${TEMPDIR}/s-${input_file}"
@@ -279,8 +279,8 @@ while getopts ":dhablmi" options; do
 		l) FFMPEGLOGLEVEL="" ;;
 		m) movflag="-movflags faststart" ;;
 		i) INTERACTIVEMODE=1 ;;
-		\?) echo "-${OPTARG}: Invalid option" 1>&2 ; exit 1 ;;
-		:) echo "Error : -${OPTARG} : Needs an argument" 1>&2 ; exit 1 ;;
+		\?) error "-${OPTARG}: Invalid option" 1 ;;
+		:) error "-${OPTARG} : Needs an argument" 1 ;;
 	esac
 done
 
@@ -306,8 +306,7 @@ END
 			if [[ "$(file --mime-type "${argument_validation}")" =~ $ && -e "${argument_validation}" ]]; then
 				valid_argument="${argument_validation}"
 				[[ -d "${argument_validation}" ]] && {
-					echo "${argument_validation} is a directory, aborting..."
-					exit 1
+					error "${argument_validation} is a directory, aborting..." 1
 				}
 				break
 				# if nothing matches, this passes "" (nothing), seeking alternatives to this
@@ -315,23 +314,19 @@ END
 
 		done
 
-		[[ "${DEBUG}" -eq 1 ]] && echo -e "Argument passed: ${argument_validation}\nArgument validated: ${valid_argument}"
+		debug "Argument passed: ${argument_validation}\nArgument validated: ${valid_argument}"
 
 		if [[ ! "$(file -b --mime-type "${valid_argument}")" =~ "video" || -z "${valid_argument}" ]]; then
 
-			if [[ "${#filequeue[@]}" -eq 0 ]]; then
-				echo "No files in filequeue, did you forget to specify a file?"
-				exit 1
-			fi
+			[[ "${#filequeue[@]}" -eq 0 ]] &&	error "No files in filequeue, did you forget to specify a file?" 1
 
 			#if no argument matches, it causes the last argument to be passed to $argument, this double checks it
-			echo "${valid_argument} : Passed video does not exist, is not supported or it is an option"
-			exit 1
+			error "${valid_argument} : Passed video does not exist, is not supported or it is an option" 1
 
 		fi
 
 		[[ -f "${valid_argument}" ]] && filequeue+=("${valid_argument}")
-		[[ "${DEBUG}" -eq 1 ]] && echo "getopts : '${valid_argument}' added to filequeue, it now has ${#filequeue[@]} item(s)"
+		debug "getopts : '${valid_argument}' added to filequeue, it now has ${#filequeue[@]} item(s)"
 
 		reduce
 
@@ -339,24 +334,15 @@ END
 
 [[ "${flag_all}" -eq 1 ]] && {
 
-#	for file in "$@"; do
-#		[[ "$(file -b --mime-type "${file}")" =~ "video" && ! -d "${file}" ]] &&	{
-#			echo "File argument detected, but -a was passed, ignoring...";
-#			break
-#		}
-#	done
-
 	for file in *; do
 
 		[[ "$(file -b --mime-type "${file}")" =~ "video" && ! -d "${file}" ]] && filequeue+=("${file}")
 
 	done
 
-	if [[ "${#filequeue[@]}" -eq 0 ]]; then
-		echo "No valid files found"
-	fi
+	[[ "${#filequeue[@]}" -eq 0 ]] && error "No valid files found" 1
 
-	[[ "${DEBUG}" -eq 1 ]] && echo "Files found: " "${filequeue[@]}"
+	debug "Files found: " "${filequeue[@]}"
 	reduce
 
 }
