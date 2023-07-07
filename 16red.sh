@@ -18,7 +18,6 @@ fi
 
 #Setting variables
 
-SUPPORTED_EXTENSIONS="^.*\.(mkv|mov|mp4)['\"]?$"
 FFMPEGLOGLEVEL="-v 16 -stats" #makes ffmpeg/ffprobe hide everything but errors
 INTERACTIVEMODE=0
 DEBUG=0
@@ -304,10 +303,10 @@ END
 
 		for argument_validation in "$@"; do
 
-			if [[ "${argument_validation}" =~ $SUPPORTED_EXTENSIONS && -e "${argument_validation}" ]]; then
-				argument="${argument_validation}"
-				[[ -d "${argument}" ]] && {
-					echo "Passed argument is a directory, aborting..."
+			if [[ "$(file --mime-type "${argument_validation}")" =~ $ && -e "${argument_validation}" ]]; then
+				valid_argument="${argument_validation}"
+				[[ -d "${argument_validation}" ]] && {
+					echo "${argument_validation} is a directory, aborting..."
 					exit 1
 				}
 				break
@@ -316,9 +315,9 @@ END
 
 		done
 
-		[[ "${DEBUG}" -eq 1 ]] && echo -e "Argument passed: ${argument_validation}\nArgument validated: ${argument}"
+		[[ "${DEBUG}" -eq 1 ]] && echo -e "Argument passed: ${argument_validation}\nArgument validated: ${valid_argument}"
 
-		if [[ ! "${argument}" =~ $SUPPORTED_EXTENSIONS || -z "${argument}" ]]; then
+		if [[ ! "$(file -b --mime-type "${valid_argument}")" =~ "video" || -z "${valid_argument}" ]]; then
 
 			if [[ "${#filequeue[@]}" -eq 0 ]]; then
 				echo "No files in filequeue, did you forget to specify a file?"
@@ -326,13 +325,13 @@ END
 			fi
 
 			#if no argument matches, it causes the last argument to be passed to $argument, this double checks it
-			echo "${argument} : Passed video does not exist, is not supported or it is an option"
+			echo "${valid_argument} : Passed video does not exist, is not supported or it is an option"
 			exit 1
 
 		fi
 
-		[[ -f "${argument}" ]] && filequeue+=("${argument}")
-		[[ "${DEBUG}" -eq 1 ]] && echo "getopts : '${argument}' added to filequeue, it now has ${#filequeue[@]} item(s)"
+		[[ -f "${valid_argument}" ]] && filequeue+=("${valid_argument}")
+		[[ "${DEBUG}" -eq 1 ]] && echo "getopts : '${valid_argument}' added to filequeue, it now has ${#filequeue[@]} item(s)"
 
 		reduce
 
@@ -340,16 +339,16 @@ END
 
 [[ "${flag_all}" -eq 1 ]] && {
 
-	for file in "$@"; do
-		[[ "$file" =~ ${SUPPORTED_EXTENSIONS} && ! -d "${file}" ]] &&	{
-			echo "File argument detected, but -a was passed, ignoring...";
-			break
-		}
-	done
+#	for file in "$@"; do
+#		[[ "$(file -b --mime-type "${file}")" =~ "video" && ! -d "${file}" ]] &&	{
+#			echo "File argument detected, but -a was passed, ignoring...";
+#			break
+#		}
+#	done
 
 	for file in *; do
 
-		[[ "$file" =~ ${SUPPORTED_EXTENSIONS} && ! -d "${file}" ]] && filequeue+=("${file}")
+		[[ "$(file -b --mime-type "${file}")" =~ "video" && ! -d "${file}" ]] && filequeue+=("${file}")
 
 	done
 
