@@ -23,6 +23,7 @@ command -v ffmpeg &> /dev/null || error "'FFmpeg' was not found in the current u
 FFMPEGLOGLEVEL="-v 16 -stats" #makes ffmpeg/ffprobe hide everything but errors
 INTERACTIVEMODE=0
 DEBUG=0
+reduce_only=0
 bitrate_mode=0
 info_checked=0
 format_checked=0
@@ -52,6 +53,7 @@ usage() {
 -b : Toggles only bitrate mode, faster processing, incertain quality/size (targets 8mb)
 -l : Toggles FFmpeg log level to normal. Disabled by default
 -m : Enables -movflag faststart, might take longer to start but helps with playback issues
+-f : Only reduces the video size, doesn't format into 9:16
 not implemented:
 -i : Toggles interactive mode, prompting for certain options
 Usage example: ${0} (-b) (-d) file.mp4
@@ -110,13 +112,13 @@ reduce() {
 			echo "${filesize_reduction_total}"
 			mv "${TEMPDIR}/${output_reduce_filename}" "${output_dir}"
 			filequeue=( "${filequeue[@]:0:$ARRAYINDEX}" "${filequeue[@]:(($ARRAYINDEX+1))}" )
-			format
+			[[ $reduce_only -eq 0 ]] && format
 
 		else
 
 			echo "Target video under 16MB, skipping"; #TODO add $INTERACTIVEMODE
 			filequeue=( "${filequeue[@]:0:$ARRAYINDEX}" "${filequeue[@]:(($ARRAYINDEX+1))}" )
-			format
+			[[ $reduce_only -eq 0 ]] && format
 
 		fi
 
@@ -277,7 +279,7 @@ smallcut() {
 }
 
 
-while getopts ":dhablmi" options; do
+while getopts ":dhablmfi" options; do
              # ^ silent mode getopts
 	case ${options} in
 		d) DEBUG=1 ;;
@@ -286,6 +288,7 @@ while getopts ":dhablmi" options; do
 		b) bitrate_mode=1 ;;
 		l) FFMPEGLOGLEVEL="" ;;
 		m) movflag="-movflags faststart" ;;
+		f) reduce_only=1 ;;
 		i) INTERACTIVEMODE=1 ;;
 		\?) error "-${OPTARG}: Invalid option" 1 ;;
 		:) error "-${OPTARG} : Needs an argument" 1 ;;
