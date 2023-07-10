@@ -3,7 +3,7 @@
 #O código e os comentários estarão em INGLÊS!
 
 #Start date: December 8 2022
-#Last Update: July 2023
+#Last Update: July 10 2023
 #External help: aakova, TomJo2000
 #Purpose: Reduce video filesize to <16MB, optionally format video to 9:16 using black bars and cut formatted video into ≃14.9 second segments.
 
@@ -30,11 +30,19 @@ flag_all=0
 ARRAYINDEX=0
 TEMPDIR=$(mktemp -d -t 16red-XXXXX) || error "'mktemp' command failed to create a temporary directory" 1
 
-trap 'rm -r "${TEMPDIR}"; exit 130' SIGINT
+quit() {
+	[[ $quit_counter ]] && {
+		rm -r "${TEMPDIR}"
+		exit 130
+	} || echo -e "\n\033[0;33mPress one more time to end process. This will delete processing files.\033[0m"
+	((quit_counter++))
+}
 
 debug() {
 	[[ "${DEBUG}" -eq 1 ]] && echo -e "\033[0;33m$*\033[0m"
 }
+
+trap quit SIGINT
 
 usage() {
 	cat <<END
